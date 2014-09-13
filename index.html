@@ -36,12 +36,20 @@
   <div id="app">
     <h1>hack0913</h1>
     <button id="start" v-on="click: toggle" class="btn btn-default">{{ isPlaying ? 'Stop' : 'Start' }}</button>
-    <div v-repeat="score">
-      <label>{{ a }}</label>
-      <input type="range" v-model="a" v-on="change: update($index)" value="{{ a }}" min="1" max="12">
-      <label>{{ b }}</label>
-      <input type="range" v-model="b" v-on="change: update($index)" value="{{ b }}" min="1" max="12">
-      <hr>
+    <div class="form-horizontal" v-repeat="score">
+      <h4>{{ name }}</h4>
+      <div class="form-group">
+        <label class="col-sm-2 control-label">{{ a }}</label>
+        <div class="col-sm-10">
+          <input type="range" v-model="a" v-on="change: update($index)" value="{{ a }}" min="1" max="12">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="col-sm-2 control-label">{{ b }}</label>
+        <div class="col-sm-10">
+          <input type="range" v-model="b" v-on="change: update($index)" value="{{ b }}" min="1" max="12">
+        </div>
+      </div>
     </div>
   </div>
 
@@ -380,10 +388,10 @@ window.onload = function() {
     data: {
       isPlaying: false,
       score: [
-        { a:  6, b: 3 },
-        { a:  5, b: 2 },
-        { a: 12, b: 8 },
-        { a:  6, b: 2 },
+        { a:  6, b: 3, name: "Rhythm" },
+        { a:  5, b: 2, name: "Bass" },
+        { a: 12, b: 8, name: "Sequence" },
+        { a:  6, b: 2, name: "Synth" },
       ]
     },
     methods: {
