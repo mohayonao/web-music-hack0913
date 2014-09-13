@@ -1,0 +1,408 @@
+<!DOCTYPE>
+<html style="height:100%">
+<head>
+  <meta charset="utf-8">
+  <title>hack0913</title>
+  <link rel="stylesheet" href="//maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css">
+  <style>
+    #start { margin: 25px 0 }
+    #canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+    }
+    #app {
+      position: absolute;
+      top: 25px;
+      left: 25px;
+      width: 320px;
+      padding: 25px;
+      background: #ecf0f1;
+      border-radius: 25px;
+      opacity: 0.85;
+    }
+  </style>
+  <script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/underscore.js/1.6.0/underscore-min.js"></script>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/three.js/r68/three.min.js"></script>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/vue/0.10.5/vue.min.js"></script>
+  <script src="neume.js"></script>
+  <script src="music.js"></script>
+</head>
+<body style="height:100%">
+  <div id="canvas"></div>
+  <div id="app">
+    <h1>hack0914</h1>
+    <button id="start" v-on="click: toggle" class="btn btn-default">{{ isPlaying ? 'Start' : 'Stop' }}</button>
+    <div v-repeat="score">
+      <label>{{ a }}</label>
+      <input type="range" v-model="a" v-on="change: update($index)" value="{{ a }}" min="1" max="12">
+      <label>{{ b }}</label>
+      <input type="range" v-model="b" v-on="change: update($index)" value="{{ b }}" min="1" max="12">
+      <hr>
+    </div>
+  </div>
+
+<script>
+var vue     = null;
+var buffers = [];
+var reverb  = null;
+var comp    = null;
+var timer   = null;
+var scale   = null;
+var score   = null;
+
+scale = [ 0, 2, 3, 7, 9 ];  // iwato
+scale = [ 0, 4, 5, 7, 11 ]; // ryukyu
+scale = [ 0, 2, 3, 5, 7, 8, 10]; // aeolian
+scale = [ 0, 2, 4, 5, 7, 8, 10 ]; // bartok
+scale = [ 0, 1, 3, 7, 8 ]; // pelog
+
+var BD = 0;
+var SD = 1;
+var CH = 2;
+var OH = 3;
+
+[ "bd.wav", "sd.wav", "ch.wav", "oh.wav", "ir.wav" ].forEach(function(url, i) {
+  Neume.Buffer.load(url).then(function(buffer) {
+    buffers[i] = buffer;
+  });
+});
+
+var Drum = new Neume(function($, num, amp, dur) {
+  return $("xline", { start: 0.5, end: 0.001, dur: 0.100 * dur},
+    $(buffers[num], { mul: 0.100 * amp })
+  ).on("end", function(e) {
+    this.stop(e.playbackTime);
+  });
+});
+
+var SynthBass = new Neume(function($, freq, amp) {
+  return $("xline", { start: 0.25 * amp, end: 0.001, dur: 0.25 },
+    $("lpf", { freq: freq  * 4, Q: 6 }, $("shaper", { curve: 0.65 }, $("saw", { freq: freq })))
+  ).on("end", function(e) {
+    this.stop(e.playbackTime);
+  });
+});
+
+var SynthSeq = new Neume(function($, freq, amp, dur) {
+  return $("xline", { start: 0.125 * amp, end: 0.001, dur: 0.1 },
+    $("lpf", { freq: freq * 4, Q: $("line", { start: 25, end: 5, dur: dur * 0.25 }) }, $("saw", { freq: freq }))
+  ).on("end", function(e) {
+    this.stop(e.playbackTime);
+  });
+});
+
+var Synth = new Neume(function($, freq, amp, dur) {
+  return $("xline", { start: 0.125 * amp, end: 0.001, dur: 5 },
+    $("+", { mul: 0.25 },
+      $("saw", { freq: freq }),
+      $("saw", { freq: freq, detune: $("sin", { freq: 12.5, mul: 20 }) })
+    )
+  ).on("end", function(e) {
+    this.stop(e.playbackTime);
+  });
+});
+
+var Reverb = new Neume(function($) {
+  return $("+",
+    $.in(0).mul(0.6),
+    $("conv", { buffer: buffers[4], mul: 0.4 }, $.in(0))
+  );
+});
+
+var Comp = new Neume(function($) {
+  return $("comp", $.in(0));
+});
+
+var instruments = [];
+
+instruments[0] = function drum(score, index, playbackTime) {
+  switch (index % 8) {
+    case 0: return new Drum(CH, 1, 1);
+    case 1: return new Drum(CH, 4, 1);
+    case 2: return new Drum(OH, 2, 2);
+    case 3: return new Drum(SD, 2, 3);
+    case 4: return new Drum(BD, 1, 8);
+    case 5: return new Drum(OH, 6, 3);
+    case 6: return new Drum(SD, 4, 1);
+    case 7: return new Drum(BD, 4, 8);
+  }
+};
+instruments[1] = function bass(score, index, playbackTime) {
+  var midi = score[index % score.length];
+
+  var freq;
+  freq = score[index];
+  freq = degreeToScale(freq, scale, 12);
+  freq = (freq % 32) + 36;
+  freq = midicps(freq);
+
+  return new SynthBass(freq, 0.2, 0.25);
+};
+instruments[2] = function synth1(score, index, playbackTime) {
+  var midi = score[index % score.length];
+
+  if (midi !== 0) {
+    var freq;
+    freq = score[index];
+    freq = degreeToScale(freq, scale, 12);
+    freq = (freq % 32) + 60;
+    freq = midicps(freq);
+
+    return new SynthSeq(freq, 0.2, 0.1);
+  }
+};
+instruments[3] = function synth2(score, index, playbackTime) {
+  var midi = score[index % score.length];
+
+  if (midi !== 0) {
+    var freq;
+    freq = score[index];
+    freq = degreeToScale(freq, scale, 12);
+    freq = (freq % 32) + 72;
+    freq = midicps(freq);
+
+    return new Synth(freq, 0.2, 2.0);
+  }
+};
+
+function start() {
+  score = [ music(6, 3), music(5, 2), music(12, 8), music(6, 2) ];
+
+  comp = new Comp().start();
+  reverb = new Reverb().connect(comp).start();
+
+  timer = new Neume.Interval(0.125, function(e) {
+    score.forEach(function(score, i) {
+      var index = e.count % score.length;
+      if (instruments[i]) {
+        var synth = instruments[i](score, index);
+        if (synth) {
+          synth.connect(reverb).start(e.playbackTime);
+        }
+      }
+    });
+  }).start();
+}
+
+function midicps(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);;
+}
+
+function degreeToScale(degree, scale, octaveStep) {
+  var octave = (degree / scale.length)|0;
+  return scale[degree % scale.length] + octave * octaveStep;
+}
+
+function stop() {
+  if (timer) {
+    timer.stop();
+  }
+  if (reverb) {
+    reverb.stop();
+  }
+  if (comp) {
+    comp.stop();
+  }
+}
+
+function canUseWebGL() {
+  try {
+    return !!window.WebGLRenderingContext && !!document.createElement("canvas").getContext("experimental-webgl");
+  } catch(e) {
+    return false;
+  }
+}
+
+var WaveVisualizer = (function() {
+  function WaveVisualizer(analyer, spec) {
+    this._analyer = analyer;
+
+    this._scene  = new THREE.Scene();
+    this._camera = new THREE.PerspectiveCamera(75, spec.width / spec.height, 0.1, 1000);
+
+    if (canUseWebGL()) {
+      this._analyer.fftSize = 256;
+      this._renderer = new THREE.WebGLRenderer();
+      this._maxWaves = 32;
+    } else {
+      this._analyer.fftSize = 128;
+      this._renderer = new THREE.CanvasRenderer();
+      this._maxWaves = 4;
+    }
+    this._renderer.setSize(spec.width, spec.height);
+
+    this._state = "init";
+    this._timeData = new Uint8Array(analyer.frequencyBinCount);
+    this._freqData = new Uint8Array(analyer.frequencyBinCount);
+    this._waves = [];
+
+    Object.defineProperties(this, {
+      width: {
+        value: spec.width,
+        enumerable: true
+      },
+      height: {
+        value: spec.height,
+        enumerable: true
+      },
+      state: {
+        get: function() {
+          return this._state;
+        },
+        enumerable: true
+      },
+      domElement: {
+        value: this._renderer.domElement,
+        enumerable: true
+      },
+      camera: {
+        value: this._camera,
+        enumerable: true
+      }
+    })
+  }
+
+  WaveVisualizer.prototype.start = function() {
+    if (this._state !== "start") {
+      this._state = "start";
+      requestAnimationFrame(this.render.bind(this));
+    }
+    return this;
+  };
+
+  WaveVisualizer.prototype.stop = function() {
+    if (this._state === "start") {
+      this._state = "stop";
+    }
+    return this;
+  };
+
+  WaveVisualizer.prototype.render = function(t) {
+    this._analyer.getByteTimeDomainData(this._timeData);
+    this._analyer.getByteFrequencyData(this._freqData);
+
+    this._render(t);
+
+    this._camera.lookAt(this._scene.position);
+    this._renderer.render(this._scene, this._camera);
+
+    if (this._state === "start") {
+      requestAnimationFrame(this.render.bind(this));
+    }
+  };
+
+  WaveVisualizer.prototype._render = function(t) {
+    if (this._maxWaves <= this._waves.length) {
+      this._scene.remove(this._waves.pop());
+    }
+
+    var geometry = new THREE.Geometry();
+    geometry.vertices = getVertices(this._timeData);
+
+    var material = new THREE.LineBasicMaterial({
+      color: new THREE.Color().setHSL(calcHue(this._freqData), 0.8, 0.6).getHex()
+    });
+
+    var wave = new THREE.Line(geometry, material);
+    wave.rotation.set(Math.cos(t * 0.25), 0, Math.sin(t * 0.25));
+
+    this._scene.add(wave);
+    this._waves.unshift(wave);
+
+    var r = this.width / this._timeData.length;
+
+    this._waves.forEach(function(wave, index, list) {
+      var scaleR = (index + 1) * r;
+      var scaleY = (list.length - index) * 32;
+
+      wave.scale.set(scaleR, scaleY, scaleR);
+    }, this);
+  };
+
+  function calcHue(freqData) {
+    var maxIndex = 0;
+    for (var i = 0, imax = freqData.length * 0.5; i < imax; i += 4) {
+      if (112 <= freqData[i]) {
+        maxIndex = i * 2;
+      }
+    }
+    return maxIndex / freqData.length;
+  }
+
+  function getVertices(data) {
+    var result = new Array(data.length + 1);
+
+    for (var i = 0, imax = data.length; i <= imax; i++) {
+      var x = Math.cos(Math.PI * 2 * (i / imax));
+      var y = ((data[i % imax] / 256) - 0.5) * 2;
+      var z = Math.sin(Math.PI * 2 * (i / imax));
+      result[i] = new THREE.Vector3(x, y, z);
+    }
+
+    return result;
+  }
+
+  return WaveVisualizer;
+})();
+
+var canvas = $("#canvas").on("mousemove", function(e) {
+  var x = (e.pageX - canvas.$offset.left) / visualizer.width  - 0.5;
+  var y = (e.pageY - canvas.$offset.top ) / visualizer.height - 0.5;
+
+  visualizer.camera.position.set(
+    Math.sin(x * 2 * Math.PI) * -300,
+    y * 250,
+    Math.cos(x * 2 * Math.PI) * -300
+  );
+});
+canvas.$offset = canvas.offset();
+
+var visualizer = new WaveVisualizer(Neume.analyer, { width: canvas.width(), height: canvas.height() });
+
+visualizer.camera.position.set(0, 0, -300);
+
+canvas.append(visualizer.domElement);
+
+
+
+window.onload = function() {
+  vue = new Vue({
+    el: "#app",
+    data: {
+      isPlaying: false,
+      score: [
+        { a:  6, b: 3 },
+        { a:  5, b: 2 },
+        { a: 12, b: 8 },
+        { a:  6, b: 2 },
+      ]
+    },
+    methods: {
+      toggle: function() {
+        this.isPlaying = !this.isPlaying;
+        if (this.isPlaying) {
+          start();
+          visualizer.start();
+        } else {
+          stop();
+          visualizer.stop();
+        }
+      },
+      update: _.throttle(function(index) {
+        var a = this.$data.score[index].a;
+        var b = this.$data.score[index].b;
+
+        b = Math.min(a, b);
+
+        score[index] = music(a, b);
+      }, 500)
+    }
+  });
+};
+</script>
+</body>
+</html>
